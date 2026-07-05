@@ -12,5 +12,6 @@ include("history.jl")
 include("dispatch.jl")
 include("serial.jl")
 include("app.jl")
+include("precompile.jl")
 
 end # module Squelch
