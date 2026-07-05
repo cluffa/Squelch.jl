@@ -8,7 +8,7 @@ Not registered in any Julia registry.
 
 ## Install
 
-    pkg> app add https://github.com/<you>/Squelch.jl
+    pkg> app add https://github.com/cluffa/Squelch.jl
 
 Make sure `~/.julia/bin` is on your `PATH` (required by Julia's Pkg Apps
 feature).
