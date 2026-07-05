@@ -16,3 +16,6 @@ LibSerialPort = "0.6.0"
 Match = "2.4.1"
 TOML = "1.0.3"
 Tachikoma = "2.3.1"
+
+[apps]
+squelch = {}
