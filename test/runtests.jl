@@ -8,4 +8,5 @@ using Squelch
     include("dispatch_test.jl")
     include("serial_test.jl")
     include("configure_test.jl")
+    include("monitor_test.jl")
 end

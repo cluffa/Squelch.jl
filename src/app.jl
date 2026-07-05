@@ -181,6 +181,55 @@ function view_screen(m::SquelchModel, ::Val{CONFIGURE}, f::Frame)
     return nothing
 end
 
+function sorted_variable_names(m::SquelchModel)
+    m.state === nothing && return String[]
+    return sort(collect(keys(m.state.variables)))
+end
+
+function update_screen!(m::SquelchModel, ::Val{MONITOR}, evt::KeyEvent)
+    names = sorted_variable_names(m)
+    @match (evt.key, evt.char) begin
+        (:char, 'q') => (m.quit = true)
+        (:char, 'c') => (m.mode = CONFIGURE)
+        (:down, _) => (m.selected_var_idx = min(m.selected_var_idx + 1, max(length(names), 1)))
+        (:up, _) => (m.selected_var_idx = max(m.selected_var_idx - 1, 1))
+        (:enter, _) => (m.show_chart = !isempty(names))
+        (:escape, _) => (m.show_chart = false)
+        _ => nothing
+    end
+    return nothing
+end
+
+function view_screen(m::SquelchModel, ::Val{MONITOR}, f::Frame)
+    buf = f.buffer
+    names = sorted_variable_names(m)
+
+    if m.show_chart && !isempty(names)
+        selected = names[clamp(m.selected_var_idx, 1, length(names))]
+        h = m.state.variables[selected]
+        series = [DataSeries(h.values; label=selected)]
+        render(Chart(series; block=Block(title="$selected ($(h.unit)) — esc: back")), f.area, buf)
+        return nothing
+    end
+
+    inner = render(Block(title="Monitor (c: configure, enter: chart selected var, q: quit)"), f.area, buf)
+    rows = split_layout(Layout(Vertical, [Fill(), Fixed(10)]), inner)
+    length(rows) < 2 && return
+
+    log_area, table_area = rows[1], rows[2]
+
+    loglines = m.state === nothing ? String[] : m.state.log_lines
+    render(ScrollPane(loglines; following=true), log_area, buf)
+
+    headers = ["Name", "Value", "Unit"]
+    table_rows = [
+        [n, string(something(latest(m.state.variables[n]), m.state.variables[n].latest_raw)), m.state.variables[n].unit]
+        for n in names
+    ]
+    render(Table(headers, table_rows; block=Block(title="Variables")), table_area, buf)
+    return nothing
+end
+
 function (@main)(args::Vector{String})::Cint
     app(SquelchModel())
     return 0
