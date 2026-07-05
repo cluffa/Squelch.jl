@@ -230,19 +230,48 @@ function view_screen(m::SquelchModel, ::Val{MONITOR}, f::Frame)
     return nothing
 end
 
+"""
+Path to the optional prebuilt sysimage (see `sysimage/build.jl`). Baking
+Squelch + Tachikoma + dependencies into a custom sysimage skips almost
+all of Julia's package-loading/JIT overhead on every launch — building
+it is an explicit opt-in step (several minutes, needs PackageCompiler),
+not something that happens automatically on `pkg> app add`.
+"""
+function squelch_sysimage_path()
+    ext = Sys.isapple() ? "dylib" : Sys.iswindows() ? "dll" : "so"
+    return joinpath(homedir(), ".julia", "squelch_sysimage", "squelch.$ext")
+end
+
+function current_image_file()
+    try
+        return unsafe_string(Base.JLOptions().image_file)
+    catch
+        return ""
+    end
+end
+
 function (@main)(args::Vector{String})::Cint
-    # The serial reader runs on a background task (Threads.@spawn in
-    # start_reader_task) that does a blocking readline() call. On a
-    # single-threaded process that task has no worker thread to run on,
-    # so a blocking read stalls the entire UI. `julia_flags` in
-    # Project.toml already requests --threads=auto for installs via
-    # `pkg> app add`, but this guards direct invocations too.
-    if Threads.nthreads() == 1 && get(ENV, "SQUELCH_RETHREADED", "") != "1"
-        code = "using Squelch; exit(Squelch.main(ARGS))"
-        cmd = `$(Base.julia_cmd()) --threads=auto --project=$(Base.active_project()) -e $code -- $args`
-        cmd = addenv(cmd, "SQUELCH_RETHREADED" => "1")
-        proc = run(ignorestatus(cmd))
-        return proc.exitcode
+    if get(ENV, "SQUELCH_RELAUNCHED", "") != "1"
+        # The serial reader runs on a background task (Threads.@spawn in
+        # start_reader_task) that does a blocking readline() call. On a
+        # single-threaded process that task has no worker thread to run
+        # on, so a blocking read stalls the entire UI. `julia_flags` in
+        # Project.toml already requests --threads=auto for installs via
+        # `pkg> app add`, but this guards direct invocations too.
+        needs_threads = Threads.nthreads() == 1
+
+        sysimage_path = squelch_sysimage_path()
+        needs_sysimage = isfile(sysimage_path) && current_image_file() != sysimage_path
+
+        if needs_threads || needs_sysimage
+            flags = String["--threads=auto"]
+            needs_sysimage && push!(flags, "-J$sysimage_path")
+            code = "using Squelch; exit(Squelch.main(ARGS))"
+            cmd = `$(Base.julia_cmd()) $flags --project=$(Base.active_project()) -e $code -- $args`
+            cmd = addenv(cmd, "SQUELCH_RELAUNCHED" => "1")
+            proc = run(ignorestatus(cmd))
+            return proc.exitcode
+        end
     end
     app(SquelchModel())
     return 0

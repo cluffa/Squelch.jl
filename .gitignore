@@ -2,3 +2,5 @@
 *.jl.mem
 .vscode/
 .DS_Store
+sysimage/Project.toml
+sysimage/Manifest.toml
