@@ -9,4 +9,5 @@ using Squelch
     include("serial_test.jl")
     include("configure_test.jl")
     include("monitor_test.jl")
+    include("example_profile_test.jl")
 end

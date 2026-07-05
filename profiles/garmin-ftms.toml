@@ -1,0 +1,18 @@
+device_name = "garmin-ftms"
+baud = 115200
+
+[[rules]]
+name = "connected"
+unit = ""
+
+[rules.extractor]
+kind = "json_field"
+path = ["connected"]
+
+[[rules]]
+name = "cmd"
+unit = ""
+
+[rules.extractor]
+kind = "json_field"
+path = ["cmd"]
