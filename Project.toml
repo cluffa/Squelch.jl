@@ -19,3 +19,4 @@ PrecompileTools = "1.3.4"
 TOML = "1.0.3"
 
 [apps.squelch]
+julia_flags = ["--threads=auto"]

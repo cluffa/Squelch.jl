@@ -231,6 +231,19 @@ function view_screen(m::SquelchModel, ::Val{MONITOR}, f::Frame)
 end
 
 function (@main)(args::Vector{String})::Cint
+    # The serial reader runs on a background task (Threads.@spawn in
+    # start_reader_task) that does a blocking readline() call. On a
+    # single-threaded process that task has no worker thread to run on,
+    # so a blocking read stalls the entire UI. `julia_flags` in
+    # Project.toml already requests --threads=auto for installs via
+    # `pkg> app add`, but this guards direct invocations too.
+    if Threads.nthreads() == 1 && get(ENV, "SQUELCH_RETHREADED", "") != "1"
+        code = "using Squelch; exit(Squelch.main(ARGS))"
+        cmd = `$(Base.julia_cmd()) --threads=auto --project=$(Base.active_project()) -e $code -- $args`
+        cmd = addenv(cmd, "SQUELCH_RETHREADED" => "1")
+        proc = run(ignorestatus(cmd))
+        return proc.exitcode
+    end
     app(SquelchModel())
     return 0
 end
