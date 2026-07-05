@@ -70,5 +70,14 @@ using PrecompileTools: @setup_workload, @compile_workload
         set_text!(m_rule.pending_rule_unit, "km/h")
         handle_key!(m_rule.pending_rule_name, KeyEvent('x'))
         add_rule_from_selected_line!(m_rule)
+
+        # SimulatedLineSource: called directly (interval=0.0, no channel/
+        # background task involved) rather than through connect_simulated!,
+        # so precompilation doesn't spawn a lingering Threads.@spawn task.
+        sim = SimulatedLineSource(; interval=0.0)
+        for _ in 1:4
+            read_line(sim)
+        end
+        close_source!(sim)
     end
 end

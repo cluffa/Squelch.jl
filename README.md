@@ -31,6 +31,20 @@ A ready-made profile for garmin-ftms-sync-esp32 ships at
 `profiles/garmin-ftms.toml` — copy it to
 `~/.config/squelch/profiles/` to have it available for reuse.
 
+## Trying it without hardware
+
+Press `s` on the Connect screen to connect to a simulated device
+instead of a real port — an in-memory generator that emits plausible
+garmin-ftms-sync-esp32-style JSON status updates and ESP_LOG-style
+noise on a timer, pre-seeded with `speed`/`incline`/`connected` rules,
+jumping straight to Monitor so you see live data immediately.
+
+(An OS-level virtual serial port via `socat` was the first thing tried
+here, but `libserialport`'s macOS backend can't open a plain pty — it
+fails on a modem-control-line ioctl that BSD ptys don't implement. The
+simulated device sidesteps that by not touching real serial I/O at
+all, so it works the same on any platform.)
+
 ## Speeding up startup
 
 `squelch` is already multithreaded automatically (the serial reader

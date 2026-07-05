@@ -47,6 +47,22 @@ function connect!(m::SquelchModel)
     return nothing
 end
 
+function connect_simulated!(m::SquelchModel)
+    src = SimulatedLineSource()
+    ch = Channel{String}(1000)
+    m.line_channel = ch
+    m.reader_task = start_reader_task(src, ch)
+    rs = Ruleset("simulated", 0, [
+        VariableRule("connected", "", JSONField(["connected"])),
+        VariableRule("speed", "km/h", JSONField(["speed"])),
+        VariableRule("incline", "%", JSONField(["incline"])),
+    ])
+    m.state = MonitorState(rs)
+    m.mode = MONITOR
+    m.status_message = "Connected to simulated device"
+    return nothing
+end
+
 function drain_channel!(m::SquelchModel)
     m.state === nothing && return
     ch = m.line_channel
@@ -65,6 +81,7 @@ function update!(m::SquelchModel, evt::KeyEvent)
             (:char, 'j') || (:down, _)   => (m.selected_port_idx = min(m.selected_port_idx + 1, max(length(m.ports), 1)))
             (:char, 'k') || (:up, _)     => (m.selected_port_idx = max(m.selected_port_idx - 1, 1))
             (:char, 'r')                 => refresh_ports!(m)
+            (:char, 's')                 => connect_simulated!(m)
             (:enter, _)                  => connect!(m)
             _ => nothing
         end
@@ -93,7 +110,7 @@ end
 
 function view_connect(m::SquelchModel, f::Frame)
     buf = f.buffer
-    inner = render(Block(title="Squelch — Connect (r: refresh, enter: connect, q: quit)"), f.area, buf)
+    inner = render(Block(title="Squelch — Connect (r: refresh, enter: connect, s: simulated device, q: quit)"), f.area, buf)
     isempty(m.ports) && refresh_ports!(m)
     rows = [i == m.selected_port_idx ? "> $p" : "  $p" for (i, p) in enumerate(m.ports)]
     text = isempty(rows) ? m.status_message : join(rows, "\n")

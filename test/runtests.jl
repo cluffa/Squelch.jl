@@ -10,4 +10,5 @@ using Squelch
     include("configure_test.jl")
     include("monitor_test.jl")
     include("example_profile_test.jl")
+    include("simulated_test.jl")
 end
