@@ -6,4 +6,5 @@ using Squelch
     include("history_test.jl")
     include("ruleset_test.jl")
     include("dispatch_test.jl")
+    include("serial_test.jl")
 end
