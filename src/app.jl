@@ -110,91 +110,149 @@ end
 
 function view_connect(m::SquelchModel, f::Frame)
     buf = f.buffer
-    inner = render(Block(title="Squelch — Connect (r: refresh, enter: connect, s: simulated device, q: quit)"), f.area, buf)
+    area = render_status_bar(m, f.area, buf, "j/k: select port │ enter: connect │ r: refresh │ s: simulated device │ q: quit")
+    inner = render(Block(title="Squelch — Connect"), area, buf)
     isempty(m.ports) && refresh_ports!(m)
+    m.selected_port_idx = clamp(m.selected_port_idx, 1, max(length(m.ports), 1))
     rows = [i == m.selected_port_idx ? "> $p" : "  $p" for (i, p) in enumerate(m.ports)]
-    text = isempty(rows) ? m.status_message : join(rows, "\n")
+    text = isempty(rows) ? "No serial ports found — press r to refresh or s for a simulated device" : join(rows, "\n")
     render(Paragraph([Span(text)]), inner, buf)
     return nothing
 end
 
 function add_rule_from_selected_line!(m::SquelchModel)
     m.state === nothing && return
-    isempty(m.state.log_lines) && return
+    if isempty(m.state.log_lines)
+        m.status_message = "No log lines yet — wait for device output"
+        return
+    end
     name = strip(text(m.pending_rule_name))
-    isempty(name) && return
+    if isempty(name)
+        m.status_message = "Variable name is required (tab to the name field)"
+        return
+    end
     unit = strip(text(m.pending_rule_unit))
     line = m.state.log_lines[clamp(m.configure_log_idx, 1, length(m.state.log_lines))]
     pattern_str = strip(text(m.pending_pattern))
 
     extractor = if !isempty(pattern_str)
-        RegexCapture(Regex(pattern_str), 1)
+        re = try
+            Regex(pattern_str)
+        catch
+            m.status_message = "Invalid regex: $pattern_str"
+            return
+        end
+        RegexCapture(re, 1)
     elseif try_parse_json(line) !== nothing
-        JSONField([name])
+        JSONField([String(name)])
     else
+        m.status_message = "Selected line is not JSON — enter a regex with a capture group"
         return
     end
 
     push!(m.state.ruleset.rules, VariableRule(String(name), String(unit), extractor))
+    m.status_message = "Added rule '$name' ($(length(m.state.ruleset.rules)) total) — press s to save"
     set_text!(m.pending_rule_name, "")
     set_text!(m.pending_rule_unit, "")
     set_text!(m.pending_pattern, "")
     return nothing
 end
 
+const CONFIGURE_FOCUS_ORDER = (:log, :name, :unit, :pattern)
+
+function cycle_configure_focus!(m::SquelchModel)
+    i = findfirst(==(m.configure_focus), CONFIGURE_FOCUS_ORDER)
+    m.configure_focus = CONFIGURE_FOCUS_ORDER[mod1(something(i, 1) + 1, length(CONFIGURE_FOCUS_ORDER))]
+    return nothing
+end
+
+function focused_input(m::SquelchModel)
+    return m.configure_focus == :name ? m.pending_rule_name :
+           m.configure_focus == :unit ? m.pending_rule_unit : m.pending_pattern
+end
+
+function save_current_ruleset!(m::SquelchModel)
+    m.state === nothing && return
+    path = joinpath(profiles_dir(), m.state.ruleset.device_name * ".toml")
+    save_ruleset(m.state.ruleset, path)
+    m.status_message = "Saved profile to $path"
+    return nothing
+end
+
 function update_screen!(m::SquelchModel, ::Val{CONFIGURE}, evt::KeyEvent)
+    # While a text field is focused, plain characters (including 'm' and
+    # 's') must reach the field — only tab/escape/enter act as commands.
+    if m.configure_focus != :log
+        @match (evt.key, evt.char) begin
+            (:escape, _) => (m.configure_focus = :log)
+            (:tab, _)    => cycle_configure_focus!(m)
+            (:enter, _)  => add_rule_from_selected_line!(m)
+            _            => handle_key!(focused_input(m), evt)
+        end
+        return nothing
+    end
     @match (evt.key, evt.char) begin
-        (:escape, _) => (m.mode = MONITOR)
-        (:char, 'm') => (m.mode = MONITOR)
-        (:tab, _) => (m.configure_focus = m.configure_focus == :log ? :name :
-                       m.configure_focus == :name ? :unit :
-                       m.configure_focus == :unit ? :pattern : :log)
-        (:down, _) => begin
-            if m.configure_focus == :log && m.state !== nothing && !isempty(m.state.log_lines)
+        (:escape, _) || (:char, 'm') => (m.mode = MONITOR)
+        (:tab, _)                    => cycle_configure_focus!(m)
+        (:char, 'j') || (:down, _)   => begin
+            if m.state !== nothing && !isempty(m.state.log_lines)
                 m.configure_log_idx = min(m.configure_log_idx + 1, length(m.state.log_lines))
             end
         end
-        (:up, _) => begin
-            if m.configure_focus == :log
-                m.configure_log_idx = max(m.configure_log_idx - 1, 1)
-            end
-        end
-        (:enter, _) => add_rule_from_selected_line!(m)
-        (:char, 's') => begin
-            if m.state !== nothing
-                save_ruleset(m.state.ruleset, joinpath(profiles_dir(), m.state.ruleset.device_name * ".toml"))
-            end
-        end
-        _ => begin
-            if m.configure_focus == :name
-                handle_key!(m.pending_rule_name, evt)
-            elseif m.configure_focus == :unit
-                handle_key!(m.pending_rule_unit, evt)
-            elseif m.configure_focus == :pattern
-                handle_key!(m.pending_pattern, evt)
-            end
-        end
+        (:char, 'k') || (:up, _)     => (m.configure_log_idx = max(m.configure_log_idx - 1, 1))
+        (:enter, _)                  => add_rule_from_selected_line!(m)
+        (:char, 's')                 => save_current_ruleset!(m)
+        _ => nothing
     end
     return nothing
 end
 
+# Splits a status-bar row off the bottom of `area`, renders `hints` (and
+# the current status message, if any) into it, and returns the remaining
+# area for the screen's content.
+function render_status_bar(m::SquelchModel, area, buf, hints::String)
+    rows = split_layout(Layout(Vertical, [Fill(), Fixed(1)]), area)
+    length(rows) < 2 && return area
+    content, bar = rows[1], rows[2]
+    spans = Span[Span(" $hints", tstyle(:text_dim))]
+    isempty(m.status_message) || push!(spans, Span("  │  $(m.status_message)", tstyle(:accent)))
+    render(Paragraph(spans), bar, buf)
+    return content
+end
+
 function view_screen(m::SquelchModel, ::Val{CONFIGURE}, f::Frame)
     buf = f.buffer
-    inner = render(Block(title="Configure (tab: switch field, enter: add rule, s: save, esc: monitor)"), f.area, buf)
-    cols = split_layout(Layout(Horizontal, [Fill(), Fixed(40)]), inner)
+    hints = m.configure_focus == :log ?
+        "j/k: select line │ tab: edit fields │ enter: add rule │ s: save │ esc/m: monitor" :
+        "type into field │ tab: next field │ enter: add rule │ esc: back to log"
+    area = render_status_bar(m, f.area, buf, hints)
+    inner = render(Block(title="Configure"), area, buf)
+    cols = split_layout(Layout(Horizontal, [Fill(), Fixed(44)]), inner)
     length(cols) < 2 && return
     log_area, form_area = cols[1], cols[2]
 
     lines = m.state === nothing ? String[] : m.state.log_lines
-    rows = [i == m.configure_log_idx ? "> $l" : "  $l" for (i, l) in enumerate(lines)]
-    render(ScrollPane(rows; following=false), log_area, buf)
+    m.configure_log_idx = clamp(m.configure_log_idx, 1, max(length(lines), 1))
+    marker = m.configure_focus == :log ? ">" : "·"
+    rows = [i == m.configure_log_idx ? "$marker $l" : "  $l" for (i, l) in enumerate(lines)]
+    # Keep the selected line visible: scroll so it sits inside the pane.
+    offset = max(0, m.configure_log_idx - max(log_area.height, 1))
+    render(ScrollPane(rows; following=false, offset=offset), log_area, buf)
+
+    m.pending_rule_name.focused = m.configure_focus == :name
+    m.pending_rule_unit.focused = m.configure_focus == :unit
+    m.pending_pattern.focused = m.configure_focus == :pattern
 
     form_rows = split_layout(Layout(Vertical, [Fixed(3), Fixed(3), Fixed(3), Fill()]), form_area)
-    if length(form_rows) >= 3
-        render(m.pending_rule_name, form_rows[1], buf)
-        render(m.pending_rule_unit, form_rows[2], buf)
-        render(m.pending_pattern, form_rows[3], buf)
-    end
+    length(form_rows) < 4 && return
+    render(m.pending_rule_name, form_rows[1], buf)
+    render(m.pending_rule_unit, form_rows[2], buf)
+    render(m.pending_pattern, form_rows[3], buf)
+
+    rules = m.state === nothing ? VariableRule[] : m.state.ruleset.rules
+    rule_lines = isempty(rules) ? ["(none yet — fill in a name and press enter)"] :
+        ["$(r.name)$(isempty(r.unit) ? "" : " ($(r.unit))")" for r in rules]
+    render(ScrollPane(rule_lines; following=false, block=Block(title="Rules")), form_rows[4], buf)
     return nothing
 end
 
@@ -208,8 +266,8 @@ function update_screen!(m::SquelchModel, ::Val{MONITOR}, evt::KeyEvent)
     @match (evt.key, evt.char) begin
         (:char, 'q') => (m.quit = true)
         (:char, 'c') => (m.mode = CONFIGURE)
-        (:down, _) => (m.selected_var_idx = min(m.selected_var_idx + 1, max(length(names), 1)))
-        (:up, _) => (m.selected_var_idx = max(m.selected_var_idx - 1, 1))
+        (:char, 'j') || (:down, _) => (m.selected_var_idx = min(m.selected_var_idx + 1, max(length(names), 1)))
+        (:char, 'k') || (:up, _)   => (m.selected_var_idx = max(m.selected_var_idx - 1, 1))
         (:enter, _) => (m.show_chart = !isempty(names))
         (:escape, _) => (m.show_chart = false)
         _ => nothing
@@ -221,15 +279,19 @@ function view_screen(m::SquelchModel, ::Val{MONITOR}, f::Frame)
     buf = f.buffer
     names = sorted_variable_names(m)
 
+    m.selected_var_idx = clamp(m.selected_var_idx, 1, max(length(names), 1))
+
     if m.show_chart && !isempty(names)
-        selected = names[clamp(m.selected_var_idx, 1, length(names))]
+        area = render_status_bar(m, f.area, buf, "esc: back to monitor")
+        selected = names[m.selected_var_idx]
         h = m.state.variables[selected]
         series = [DataSeries(h.values; label=selected)]
-        render(Chart(series; block=Block(title="$selected ($(h.unit)) — esc: back")), f.area, buf)
+        render(Chart(series; block=Block(title="$selected ($(h.unit))")), area, buf)
         return nothing
     end
 
-    inner = render(Block(title="Monitor (c: configure, enter: chart selected var, q: quit)"), f.area, buf)
+    area = render_status_bar(m, f.area, buf, "j/k: select variable │ enter: chart │ c: configure │ q: quit")
+    inner = render(Block(title="Monitor"), area, buf)
     rows = split_layout(Layout(Vertical, [Fill(), Fixed(10)]), inner)
     length(rows) < 2 && return
 
@@ -243,7 +305,8 @@ function view_screen(m::SquelchModel, ::Val{MONITOR}, f::Frame)
         [n, string(something(latest(m.state.variables[n]), m.state.variables[n].latest_raw)), m.state.variables[n].unit]
         for n in names
     ]
-    render(Table(headers, table_rows; block=Block(title="Variables")), table_area, buf)
+    selected = isempty(names) ? 0 : m.selected_var_idx
+    render(Table(headers, table_rows; block=Block(title="Variables"), selected=selected), table_area, buf)
     return nothing
 end
 

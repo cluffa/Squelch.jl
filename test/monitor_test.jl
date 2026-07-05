@@ -21,4 +21,16 @@
         Squelch.update_screen!(m, Val(Squelch.MONITOR), Squelch.KeyEvent(:down))
         @test m.selected_var_idx == 1  # only one variable, stays at 1
     end
+
+    @testset "j/k select variables like the arrow keys" begin
+        rs = Squelch.Ruleset("d", 115200, Squelch.VariableRule[])
+        m = Squelch.SquelchModel(state=Squelch.MonitorState(rs), mode=Squelch.MONITOR)
+        m.state.variables["a"] = Squelch.VariableHistory("a", "")
+        m.state.variables["b"] = Squelch.VariableHistory("b", "")
+
+        Squelch.update_screen!(m, Val(Squelch.MONITOR), Squelch.KeyEvent('j'))
+        @test m.selected_var_idx == 2
+        Squelch.update_screen!(m, Val(Squelch.MONITOR), Squelch.KeyEvent('k'))
+        @test m.selected_var_idx == 1
+    end
 end
