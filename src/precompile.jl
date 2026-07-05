@@ -41,9 +41,34 @@ using PrecompileTools: @setup_workload, @compile_workload
         frame4 = Frame(buf4, rect, GraphicsRegion[], Tuple{Int,Int,Matrix}[])
         view_screen(m_chart, Val(MONITOR), frame4)
 
-        update!(m_monitor, KeyEvent(:down))
-        update!(m_monitor, TaskEvent(:poll, nothing))
+        # Key/task dispatch for every screen. Each update!/update_screen!
+        # method compiles as a whole (all @match branches together), so
+        # one representative event per screen covers the method; a few
+        # extra events below exercise branches that call out to other
+        # functions needing their own separate compilation (refresh,
+        # rule-building, text input).
         update!(m_connect, KeyEvent(:down))
+        update!(m_connect, KeyEvent('q'))
+        update!(m_connect, KeyEvent('r'))          # -> refresh_ports! -> list_serial_ports()
         update!(m_configure, KeyEvent(:tab))
+        update!(m_configure, KeyEvent(:escape))
+        update!(m_monitor, KeyEvent(:down))
+        update!(m_monitor, KeyEvent(:enter))       # -> show_chart toggle branch
+        update!(m_monitor, KeyEvent('q'))
+        update!(m_monitor, TaskEvent(:poll, nothing))
+
+        # list_serial_ports() directly: real (read-only) hardware
+        # enumeration via LibSerialPort, safe to run at build time.
+        list_serial_ports()
+
+        # add_rule_from_selected_line! and the TextInput handle_key!/
+        # text/set_text! path, called directly (not via 's'/'enter' key
+        # dispatch) so precompilation never writes into the user's real
+        # ~/.config/squelch/profiles/ directory.
+        m_rule = SquelchModel(state=deepcopy(state), mode=CONFIGURE)
+        set_text!(m_rule.pending_rule_name, "speed")
+        set_text!(m_rule.pending_rule_unit, "km/h")
+        handle_key!(m_rule.pending_rule_name, KeyEvent('x'))
+        add_rule_from_selected_line!(m_rule)
     end
 end
