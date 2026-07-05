@@ -15,6 +15,11 @@ import Tachikoma: should_quit, task_queue, update!, view
     selected_var_idx::Int = 1
     show_chart::Bool = false
     status_message::String = ""
+    configure_log_idx::Int = 1
+    pending_rule_name::TextInput = TextInput(; label="Variable name:")
+    pending_rule_unit::TextInput = TextInput(; label="Unit:")
+    pending_pattern::TextInput = TextInput(; label="Regex (with 1 capture group):")
+    configure_focus::Symbol = :log
 end
 
 task_queue(m::SquelchModel) = m.tq
@@ -93,6 +98,86 @@ function view_connect(m::SquelchModel, f::Frame)
     rows = [i == m.selected_port_idx ? "> $p" : "  $p" for (i, p) in enumerate(m.ports)]
     text = isempty(rows) ? m.status_message : join(rows, "\n")
     render(Paragraph([Span(text)]), inner, buf)
+    return nothing
+end
+
+function add_rule_from_selected_line!(m::SquelchModel)
+    m.state === nothing && return
+    isempty(m.state.log_lines) && return
+    name = strip(text(m.pending_rule_name))
+    isempty(name) && return
+    unit = strip(text(m.pending_rule_unit))
+    line = m.state.log_lines[clamp(m.configure_log_idx, 1, length(m.state.log_lines))]
+    pattern_str = strip(text(m.pending_pattern))
+
+    extractor = if !isempty(pattern_str)
+        RegexCapture(Regex(pattern_str), 1)
+    elseif try_parse_json(line) !== nothing
+        JSONField([name])
+    else
+        return
+    end
+
+    push!(m.state.ruleset.rules, VariableRule(String(name), String(unit), extractor))
+    set_text!(m.pending_rule_name, "")
+    set_text!(m.pending_rule_unit, "")
+    set_text!(m.pending_pattern, "")
+    return nothing
+end
+
+function update_screen!(m::SquelchModel, ::Val{CONFIGURE}, evt::KeyEvent)
+    @match (evt.key, evt.char) begin
+        (:escape, _) => (m.mode = MONITOR)
+        (:char, 'm') => (m.mode = MONITOR)
+        (:tab, _) => (m.configure_focus = m.configure_focus == :log ? :name :
+                       m.configure_focus == :name ? :unit :
+                       m.configure_focus == :unit ? :pattern : :log)
+        (:down, _) => begin
+            if m.configure_focus == :log && m.state !== nothing && !isempty(m.state.log_lines)
+                m.configure_log_idx = min(m.configure_log_idx + 1, length(m.state.log_lines))
+            end
+        end
+        (:up, _) => begin
+            if m.configure_focus == :log
+                m.configure_log_idx = max(m.configure_log_idx - 1, 1)
+            end
+        end
+        (:enter, _) => add_rule_from_selected_line!(m)
+        (:char, 's') => begin
+            if m.state !== nothing
+                save_ruleset(m.state.ruleset, joinpath(profiles_dir(), m.state.ruleset.device_name * ".toml"))
+            end
+        end
+        _ => begin
+            if m.configure_focus == :name
+                handle_key!(m.pending_rule_name, evt)
+            elseif m.configure_focus == :unit
+                handle_key!(m.pending_rule_unit, evt)
+            elseif m.configure_focus == :pattern
+                handle_key!(m.pending_pattern, evt)
+            end
+        end
+    end
+    return nothing
+end
+
+function view_screen(m::SquelchModel, ::Val{CONFIGURE}, f::Frame)
+    buf = f.buffer
+    inner = render(Block(title="Configure (tab: switch field, enter: add rule, s: save, esc: monitor)"), f.area, buf)
+    cols = split_layout(Layout(Horizontal, [Fill(), Fixed(40)]), inner)
+    length(cols) < 2 && return
+    log_area, form_area = cols[1], cols[2]
+
+    lines = m.state === nothing ? String[] : m.state.log_lines
+    rows = [i == m.configure_log_idx ? "> $l" : "  $l" for (i, l) in enumerate(lines)]
+    render(ScrollPane(rows; following=false), log_area, buf)
+
+    form_rows = split_layout(Layout(Vertical, [Fixed(3), Fixed(3), Fixed(3), Fill()]), form_area)
+    if length(form_rows) >= 3
+        render(m.pending_rule_name, form_rows[1], buf)
+        render(m.pending_rule_unit, form_rows[2], buf)
+        render(m.pending_pattern, form_rows[3], buf)
+    end
     return nothing
 end
 
