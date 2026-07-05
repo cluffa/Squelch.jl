@@ -1,0 +1,18 @@
+name = "Squelch"
+uuid = "718c39e4-28a6-4446-8dee-61d15333cb14"
+version = "0.1.0"
+authors = ["alex <alexcluff16@gmail.com>"]
+
+[deps]
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+LibSerialPort = "a05a14c7-6e3b-5ba9-90a2-45558833e1df"
+Match = "7eb4fadd-790c-5f42-8a69-bfa0b872bfbf"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+Tachikoma = "468859d6-42d8-48b7-8ad9-1d312e0e3b0a"
+
+[compat]
+JSON3 = "1.14.3"
+LibSerialPort = "0.6.0"
+Match = "2.4.1"
+TOML = "1.0.3"
+Tachikoma = "2.3.1"
